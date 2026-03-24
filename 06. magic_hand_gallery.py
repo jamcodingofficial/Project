@@ -42,10 +42,10 @@ def load_safe(path, color):
 def get_dist(p1, p2):
     return math.hypot(p1.x - p2.x, p1.y - p2.y)
 
-img_v_a = load_safe('a.png', (0, 150, 0))
-img_fist_b = load_safe('b.png', (0, 0, 150))
-img_thumb_c = load_safe('c.png', (150, 0, 0))
-img_both_spread_d = load_safe('d.png', (150, 150, 0))
+img_v_a = load_safe('04. img/a.png', (0, 150, 0))
+img_fist_b = load_safe('04. img/b.png', (0, 0, 150))
+img_thumb_c = load_safe('04. img/c.png', (150, 0, 0))
+img_both_spread_d = load_safe('04. img/d.png', (150, 150, 0))
 img_waiting = np.zeros((720, 640, 3), np.uint8)
 cv2.putText(img_waiting, "Waiting...", (220, 360), 1, 1.5, (100, 100, 100), 2)
 
