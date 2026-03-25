@@ -1,3 +1,10 @@
+'''
+조작 방법:
+  1. 그리기 (DRAW): 검지만 펴고 허공에 선을 그립니다.
+  2. 이동 (MOVE): 엄지와 검지를 맞대어(PINCH) 그린 선을 잡고 옮깁니다.
+  3. 중단 (STOP): 손바닥을 활짝 펴면 그리기가 멈추고 선이 완성됩니다.
+  4. 초기화 (RESET): 화면 좌측 상단의 'CLEAR' 영역을 검지로 터치합니다.
+'''
 import cv2
 import mediapipe as mp
 import numpy as np
