@@ -4,7 +4,7 @@ import numpy as np
 import math
 import random
 
-# ---- [설정 및 색상] ----
+# --- [설정 및 색상] ---
 SKELETON_COLOR = (255, 253, 0)
 DRAW_GLOW_COLOR = (0, 0, 255)
 GRAB_GLOW_COLOR = (0, 255, 255)

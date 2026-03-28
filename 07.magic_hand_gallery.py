@@ -112,7 +112,7 @@ while cap.isOpened():
     elif thumb_up_count >= 2:
         current_right = img_thumb_c
         cv2.rectangle(frame, (0, h-60), (480, h), (255, 0, 0), -1)
-        cv2.putText(frame, "DUAL THUMBS UP!!", (10, h-20), 1, 1.8, (255, 255, 255), 2)
+        cv2.putText(frame, "DUAL THUMBS UP!", (10, h-20), 1, 1.8, (255, 255, 255), 2)
     elif spread_count >= 2:
         current_right = img_both_spread_d
         cv2.rectangle(frame, (0, h-60), (480, h), (150, 150, 0), -1)
