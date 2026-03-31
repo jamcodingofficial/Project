@@ -1,0 +1,385 @@
+<!--
+  [사용 방법]
+  1. 웹캠 권한 허용: 실행 후 브라우저 상단에서 카메라 접근 권한을 '허용'으로 설정해 주세요.
+  2. 시작하기 버튼 클릭: 브라우저 오디오 정책에 따라, 반드시 중앙의 '피아노 시작하기' 버튼을 눌러야 소리가 활성화됩니다.
+  3. 손 인식 및 연주: 
+     - 사용자의 실제 모습은 보이지 않으며, 네온 스타일의 손 뼈대와 손가락 끝점만 나타납니다.
+     - 화면 상단에 배치된 건반(도~도, 총 15건반)에 손가락 끝점을 가져가면 소리가 납니다.
+  4. 연주 팁:
+     - 건반 위에 손가락을 올리고 있으면 소리가 길게 유지됩니다.
+     - 손가락을 떼면 실제 피아노처럼 소리가 부드럽게 사라집니다.
+     - '도레미파...' 한글 레이블을 참고하여 연주해 보세요.
+-->
+     
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 가상 손가락 피아노</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505; 
+            color: white;
+            font-family: 'Pretendard', sans-serif;
+        }
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: cover;
+        }
+        #status {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 30px;
+            background: rgba(10, 10, 10, 0.8);
+            border-radius: 40px;
+            font-size: 16px;
+            z-index: 50;
+            border: 1px solid #6366f1;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+        #start-btn {
+            position: absolute;
+            z-index: 100;
+            padding: 20px 60px;
+            font-size: 26px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: white;
+            border-radius: 60px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.3s;
+            box-shadow: 0 15px 40px rgba(79, 70, 229, 0.5);
+        }
+        #start-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 20px 50px rgba(79, 70, 229, 0.7);
+        }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container">
+    <video id="input_video" style="display:none;"></video>
+    <canvas id="output_canvas"></canvas>
+    <button id="start-btn">피아노 시작하기</button>
+    <div id="status">카메라 권한을 허용하고 '시작' 버튼을 눌러주세요.</div>
+</div>
+
+<script>
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const startBtn = document.getElementById('start-btn');
+    const statusEl = document.getElementById('status');
+
+    let audioCtx = null;
+    let isStarted = false;
+
+    const activeNotes = new Map();
+    let fingerKeyMap = new Map(); 
+
+    const keys = [];
+    const whiteKeyLabels = ['도', '레', '미', '파', '솔', '라', '시', '도', '레', '미', '파', '솔', '라', '시', '도'];
+    const frequencies = [
+        261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 
+        523.25, 587.33, 659.25, 698.46, 783.99, 880.00, 987.77, 
+        1046.50 
+    ];
+    const blackFrequencies = [277.18, 311.13, 369.99, 415.30, 466.16, 554.37, 622.25, 739.99, 830.61, 932.33, 1108.73];
+
+    function initKeys() {
+        canvasElement.width = window.innerWidth;
+        canvasElement.height = window.innerHeight;
+        
+        const width = canvasElement.width;
+        const height = canvasElement.height;
+        const pianoHeight = height * 0.35;
+        const whiteKeyCount = 15;
+        const whiteKeyWidth = width / whiteKeyCount;
+
+        keys.length = 0;
+
+        for (let i = 0; i < whiteKeyCount; i++) {
+            keys.push({
+                index: i,
+                type: 'white',
+                x: i * whiteKeyWidth,
+                y: 0,
+                w: whiteKeyWidth,
+                h: pianoHeight,
+                freq: frequencies[i],
+                label: whiteKeyLabels[i],
+                active: false
+            });
+        }
+
+        const blackKeyWidth = whiteKeyWidth * 0.65;
+        const blackKeyHeight = pianoHeight * 0.6;
+        let blackIdx = 0;
+        for (let i = 0; i < whiteKeyCount - 1; i++) {
+            const noteInOctave = i % 7;
+            if (noteInOctave !== 2 && noteInOctave !== 6) {
+                keys.push({
+                    index: whiteKeyCount + blackIdx,
+                    type: 'black',
+                    x: (i + 1) * whiteKeyWidth - (blackKeyWidth / 2),
+                    y: 0,
+                    w: blackKeyWidth,
+                    h: blackKeyHeight,
+                    freq: blackFrequencies[blackIdx] || 1108.73,
+                    label: '',
+                    active: false
+                });
+                blackIdx++;
+            }
+        }
+    }
+
+    function startNote(keyIndex, freq) {
+        if (!audioCtx || activeNotes.has(keyIndex)) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle'; 
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.4, audioCtx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        activeNotes.set(keyIndex, { osc, gain });
+    }
+
+    function stopNote(keyIndex) {
+        const note = activeNotes.get(keyIndex);
+        if (note) {
+            const { osc, gain } = note;
+            gain.gain.cancelScheduledValues(audioCtx.currentTime);
+            gain.gain.setValueAtTime(gain.gain.value, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+            setTimeout(() => {
+                osc.stop();
+                osc.disconnect();
+                gain.disconnect();
+            }, 1000);
+            activeNotes.delete(keyIndex);
+        }
+    }
+
+    function onResults(results) {
+        canvasCtx.save();
+        
+        // 1. 배경 처리 (사용자 영상 숨김)
+        canvasCtx.fillStyle = "#0a0a14"; 
+        canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+        // 그리드 패턴
+        canvasCtx.strokeStyle = "rgba(99, 102, 241, 0.05)";
+        canvasCtx.lineWidth = 1;
+        for(let i=0; i<canvasElement.width; i+=50) {
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(i, 0);
+            canvasCtx.lineTo(i, canvasElement.height);
+            canvasCtx.stroke();
+        }
+        for(let i=0; i<canvasElement.height; i+=50) {
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(0, i);
+            canvasCtx.lineTo(canvasElement.width, i);
+            canvasCtx.stroke();
+        }
+
+        // 2. 데이터 처리
+        keys.forEach(k => k.active = false);
+        const currentFingerMap = new Map();
+        const handData = []; // 시각화를 위해 모든 손 데이터를 저장
+
+        if (results.multiHandLandmarks) {
+            results.multiHandLandmarks.forEach((landmarks, handIdx) => {
+                const tips = [4, 8, 12, 16, 20];
+                const tipCoords = [];
+
+                tips.forEach((tipIdx) => {
+                    const tip = landmarks[tipIdx];
+                    const x = (1 - tip.x) * canvasElement.width;
+                    const y = tip.y * canvasElement.height;
+                    const fingerId = `${handIdx}_${tipIdx}`;
+
+                    let foundKeyIndex = -1;
+                    const sortedKeys = [...keys].sort((a, b) => (a.type === 'black' ? -1 : 1));
+                    
+                    for (const key of sortedKeys) {
+                        if (x > key.x && x < key.x + key.w && y > key.y && y < key.y + key.h) {
+                            foundKeyIndex = key.index;
+                            key.active = true;
+                            break;
+                        }
+                    }
+                    if (foundKeyIndex !== -1) currentFingerMap.set(fingerId, foundKeyIndex);
+                    
+                    tipCoords.push({ x, y, active: foundKeyIndex !== -1 });
+                });
+
+                handData.push({ landmarks, tipCoords });
+            });
+        }
+
+        // 3. 사운드 로직
+        currentFingerMap.forEach((keyIndex, fingerId) => {
+            if (fingerKeyMap.get(fingerId) !== keyIndex) {
+                if (fingerKeyMap.has(fingerId)) {
+                    const oldKey = fingerKeyMap.get(fingerId);
+                    if (![...currentFingerMap.values()].includes(oldKey)) stopNote(oldKey);
+                }
+                const keyObj = keys.find(k => k.index === keyIndex);
+                if(keyObj) startNote(keyIndex, keyObj.freq);
+            }
+        });
+        fingerKeyMap.forEach((keyIndex, fingerId) => {
+            if (!currentFingerMap.has(fingerId)) {
+                if (![...currentFingerMap.values()].includes(keyIndex)) stopNote(keyIndex);
+            }
+        });
+        fingerKeyMap = currentFingerMap;
+
+        // 4. 건반 그리기 (중간 레이어)
+        keys.forEach(key => {
+            if (key.type === 'white') {
+                canvasCtx.globalAlpha = 0.95;
+                canvasCtx.fillStyle = key.active ? '#fbbf24' : 'rgba(255, 255, 255, 0.9)';
+                canvasCtx.strokeStyle = '#333';
+                drawRoundedRect(canvasCtx, key.x + 1, key.y, key.w - 2, key.h, 8);
+                canvasCtx.fill();
+                canvasCtx.stroke();
+
+                canvasCtx.globalAlpha = 1.0;
+                canvasCtx.fillStyle = key.active ? '#000' : '#444';
+                canvasCtx.font = `bold ${Math.max(14, canvasElement.width/50)}px Pretendard`;
+                canvasCtx.textAlign = "center";
+                canvasCtx.fillText(key.label, key.x + key.w / 2, key.h - 25);
+            }
+        });
+
+        keys.filter(k => k.type === 'black').forEach(key => {
+            canvasCtx.globalAlpha = 1.0;
+            canvasCtx.fillStyle = key.active ? '#d97706' : '#111';
+            drawRoundedRect(canvasCtx, key.x, key.y, key.w, key.h, 4);
+            canvasCtx.fill();
+        });
+
+        // 5. 손 뼈대 및 끝점 그리기 (최상단 레이어 - 건반 위)
+        handData.forEach(hand => {
+            // 뼈대(Skeleton) 그리기
+            // MediaPipe 좌표계가 반전되어 있으므로 커스텀 루프로 그림
+            canvasCtx.strokeStyle = "rgba(99, 102, 241, 0.6)"; // 네온 블루
+            canvasCtx.lineWidth = 4;
+            canvasCtx.lineCap = "round";
+
+            HAND_CONNECTIONS.forEach(([fromIdx, toIdx]) => {
+                const from = hand.landmarks[fromIdx];
+                const to = hand.landmarks[toIdx];
+                
+                canvasCtx.beginPath();
+                canvasCtx.moveTo((1 - from.x) * canvasElement.width, from.y * canvasElement.height);
+                canvasCtx.lineTo((1 - to.x) * canvasElement.width, to.y * canvasElement.height);
+                canvasCtx.stroke();
+            });
+
+            // 손가락 관절 포인트 (작은 점)
+            hand.landmarks.forEach(lm => {
+                canvasCtx.fillStyle = "rgba(255, 255, 255, 0.5)";
+                canvasCtx.beginPath();
+                canvasCtx.arc((1 - lm.x) * canvasElement.width, lm.y * canvasElement.height, 3, 0, Math.PI * 2);
+                canvasCtx.fill();
+            });
+
+            // 손가락 끝점(Tips) 강조
+            hand.tipCoords.forEach(coord => {
+                canvasCtx.shadowBlur = 20;
+                canvasCtx.shadowColor = coord.active ? "#fbbf24" : "#6366f1";
+                canvasCtx.fillStyle = coord.active ? "#fbbf24" : "#818cf8";
+                
+                canvasCtx.beginPath();
+                canvasCtx.arc(coord.x, coord.y, 16, 0, 2 * Math.PI);
+                canvasCtx.fill();
+                
+                canvasCtx.strokeStyle = "white";
+                canvasCtx.lineWidth = 3;
+                canvasCtx.stroke();
+                canvasCtx.shadowBlur = 0;
+            });
+        });
+
+        canvasCtx.restore();
+    }
+
+    function drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height);
+        ctx.lineTo(x, y + height);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+    }
+
+    const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+    });
+
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({image: videoElement});
+        },
+        width: 1280,
+        height: 720
+    });
+
+    startBtn.addEventListener('click', () => {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        startBtn.style.display = 'none';
+        statusEl.innerText = "연주 중... 아름다운 손 뼈대와 함께 연주를 시작하세요!";
+        camera.start();
+        isStarted = true;
+    });
+
+    window.addEventListener('resize', () => {
+        initKeys();
+    });
+
+    initKeys();
+
+</script>
+</body>
+</html>
